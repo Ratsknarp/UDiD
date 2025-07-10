@@ -1,10 +1,10 @@
-import io 
+import io
 import json
-import time 
-import config 
-import base64 
-import asyncio 
-import logging 
+import time
+import config
+import base64
+import asyncio
+import logging
 from database import Database
 from api import AppleDeveloperAccount, DeviceType
 
@@ -12,12 +12,12 @@ status_r2 = config.STATUS_R2
 
 class AccountChecker:
     def __init__(self, db: Database, delay: int = 60*60):
-        self.db = db 
+        self.db = db
         self.delay = delay
 
     async def fetch_accounts(self):
         return self.db.accounts.find({"inactive": {"$ne": True}})
-    
+
     async def check_udids(self, account_data: dict):
         dev_account = AppleDeveloperAccount(
             key_id=account_data["key_id"],
@@ -36,16 +36,16 @@ class AccountChecker:
                 try:
                     udid_status_response = await dev_account.get_udid_info(udid.get("id"))
                     udid_status = udid_status_response.get("data", {})
-    
+
                     status = udid_status.get("attributes", {}).get("status")
-    
+
                     if status == "ENABLED":
                         provision_data = await dev_account.create_provision(certificate_id=account_data.get('certificate_id'), device_id=udid_status.get("id"), app_id=account_data.get("app_id"))
                         udid_status["provision_data"] = provision_data
-    
+
                     await self.db.udids.update_one({"_id": udid["_id"]}, {"$set": udid_status})
                 except Exception:
-                    logging.exception(f"Error while updating udid ({udid.get('id')}) in account {account_data['_id']}")            
+                    logging.exception(f"Error while updating udid ({udid.get('id')}) in account {account_data['_id']}")
 
         # except errors.Unauthorized:
         #     await self.db.accounts.update_one({"_id": account_data["_id"]}, {"$set": {"inactive": True}})
@@ -64,10 +64,10 @@ class AccountChecker:
     #     attributes = account_data.get("account_info", {}).get('attributes', {})
     #     first_name = attributes.get("firstName")
     #     last_name = attributes.get("lastName")
-    #     status = check_status.get('certificate_status') == "ENABLED" 
+    #     status = check_status.get('certificate_status') == "ENABLED"
     #     await self.db.account_status.update_one({"pname": f"{first_name} {last_name}"}, {"$set": {"status": status}}, upsert=True)
 
-    
+
     async def start_checking(self):
         logging.info("Starting account checker...")
         try:
