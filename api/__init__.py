@@ -4,8 +4,8 @@ import enum
 import uuid
 import base64
 import aiohttp
-import logging 
-# from bot import db 
+import logging
+# from bot import db
 from api import errors
 from database import Database
 from api.key import KeyManager
@@ -104,7 +104,7 @@ class AppleDeveloperAccount:
 
         token = jwt.encode(payload, private_key, algorithm="ES256", headers=headers)
         return token
-    
+
     async def get_certificates(self) -> Any:
         url = AppleDeveloperAccount.API_ENDPOINT + "/certificates"
         headers = self.headers
@@ -112,7 +112,7 @@ class AppleDeveloperAccount:
         async with AioHttpClient() as http_client:
             data = await http_client.request("GET", url, headers=headers)
             return data.get("data", [])
-        
+
     async def get_certificate_info(self, certificate_id: str) -> Any:
         url = AppleDeveloperAccount.API_ENDPOINT + f"/certificates/{certificate_id}"
         headers = self.headers
@@ -155,7 +155,7 @@ class AppleDeveloperAccount:
             return await http_client.request("POST", url, headers=headers, json=payload)
 
 
-    async def revoke_existing_certificates(self) -> dict:
+    async def revoke_existing_certificates(self):
         url = AppleDeveloperAccount.API_ENDPOINT + "/certificates"
         headers = self.headers
 
@@ -164,13 +164,14 @@ class AppleDeveloperAccount:
             certificates = data.get("data", [])
             for cert in certificates:
                 cert_id = cert["id"]
-                if cert["attributes"]["certificateType"] in ["IOS_DISTRIBUTION"]:
+                if cert["attributes"]["certificateType"] in ["IOS_DISTRIBUTION", "IOS_DEVELOPMENT"]:
                     delete_url = f"{url}/{cert_id}"
                     await http_client.request("DELETE", delete_url, headers=headers)
 
-
-    async def create_adhoc_certificate(self, password: str) -> bytes:
+    # formerly create_adhoc_certificate
+    async def create_p12_certificates(self, password: str) -> tuple[str, str, str, str]:
         private_key, csr_key = KeyManager.generate_keys()
+        private_key_dev, csr_key_dev = KeyManager.generate_keys()
         url = AppleDeveloperAccount.API_ENDPOINT + "/certificates"
         headers = self.headers
         data = {
@@ -185,17 +186,26 @@ class AppleDeveloperAccount:
 
         async with AioHttpClient() as http_client:
             response = await http_client.request("POST", url=url, headers=headers, json=data)
+            data["data"]["attributes"] = {"certificateType": "IOS_DEVELOPMENT", "csrContent": csr_key_dev.decode("utf-8")}
+            response_dev = await http_client.request("POST", url=url, headers=self.headers, json=data)
+
             certificate_id = response["data"]["id"]
             cert_content = response["data"]["attributes"]["certificateContent"]
-            cert_file = base64.b64decode(cert_content)
-            pem_file = KeyManager.convert_cert_to_pem(cert_file)
-            key_file = KeyManager.generate_p12(key_file=private_key, pem_file=pem_file, password=password)
 
-            return certificate_id, key_file
+            certificate_id_dev = response_dev["data"]["id"]
+            cert_content_dev = response_dev["data"]["attributes"]["certificateContent"]
 
-    async def generate_certificate(self, password: str) -> str:
+            pem_file = KeyManager.convert_cert_to_pem(base64.b64decode(cert_content))
+            pem_file_dev = KeyManager.convert_cert_to_pem(base64.b64decode(cert_content_dev))
+
+            return (
+                certificate_id, KeyManager.generate_p12(key_file=private_key, pem_file=pem_file, password=password),
+                certificate_id_dev, KeyManager.generate_p12(key_file=private_key_dev, pem_file=pem_file_dev, password=password)
+            )
+
+    async def generate_certificate(self, password: str) -> tuple[str, str, str, str]:
         await self.revoke_existing_certificates()
-        return await self.create_adhoc_certificate(password=password)
+        return await self.create_p12_certificates(password=password)
 
     async def create_app_id(self, account_id: str, callback: callable = None, k: int = 5) -> str:
         url = AppleDeveloperAccount.API_ENDPOINT + "/bundleIds"
@@ -224,7 +234,7 @@ class AppleDeveloperAccount:
                     delete_bundle_id_url = url + f"/{app_id}"
                     logging.info(f"Deleting existing app id: {app_id}")
                     await http_client.request("DELETE", delete_bundle_id_url, headers=headers)
-                    
+
                 response = await http_client.request("POST", url=url, headers=headers, json=new_app_payload)
 
             app_id = response["data"]["id"]
@@ -243,7 +253,7 @@ class AppleDeveloperAccount:
                 }
                 await http_client.request("POST", url=capability_url, headers=headers, json=payload)
                 capabilities_status[capability] = True
-                
+
                 if callback and callable(callback):
                     total_capabilities = len(AppleDeveloperAccount.CAPABILITIES)
                     if (no % k == 0) or (no == total_capabilities):
@@ -253,17 +263,16 @@ class AppleDeveloperAccount:
                             logging.exception(f"Error executing callable: {e}")
 
             return app_id
-        
 
-    async def create_provision(self, certificate_id: str, device_id: str, app_id: str) -> str:
+    async def create_provision(self, certificate_id: str, device_id: str, app_id: str, adhoc: bool = True) -> dict:
         profile_url = AppleDeveloperAccount.API_ENDPOINT + "/profiles"
         headers = self.headers
+        profileType = "IOS_APP_ADHOC" if adhoc else "IOS_APP_DEVELOPMENT"
 
         async with AioHttpClient() as http_client:
-
             attributes = {
                 "name": str(uuid.uuid4()).replace('-', '0')[:16],
-                "profileType": "IOS_APP_ADHOC"
+                "profileType": profileType
             }
 
             relationships = {
@@ -300,7 +309,7 @@ class AppleDeveloperAccount:
             }
 
             profile_data = await http_client.request("POST", url=profile_url, headers=headers, json=payload)
-            return profile_data['data']['attributes']    
+            return profile_data['data']['attributes']
 
 
     async def enable_udid(self, udid_id: str) -> dict:
@@ -321,20 +330,20 @@ class AppleDeveloperAccount:
             return await http_client.request("PATCH", url, headers=headers, json=payload)
 
 
-    async def get_udid_info(self, udid_id: str) -> dict: 
+    async def get_udid_info(self, udid_id: str) -> dict:
         url = AppleDeveloperAccount.API_ENDPOINT + f"/devices/{udid_id}"
         headers = self.headers
 
         async with AioHttpClient() as http_client:
             return await http_client.request("GET", url, headers=headers)
-        
+
 
 class AccountsManager:
     db: Database
 
     def __init__(self, user_id: int):
         self.user_id = user_id
-        
+
     def accounts(self, search_resellers: bool = False):
         if search_resellers:
             return self.db.accounts.find({
@@ -357,13 +366,13 @@ class AccountsManager:
         account = await self.db.accounts.find_one(filter)
         if not account:
             return None
-        
+
         filter_argument = {"account_id": account.get('account_id')}
         if additional_filters:
             filter_argument.update(additional_filters)
 
         return self.db.udids.find(filter_argument)
-    
+
     async def set_udid_status(self, udid_id: str, set_disable: bool, account_id: str):
         filter = {"attributes.udid": udid_id, "account_id": account_id}
         if set_disable:
@@ -372,7 +381,7 @@ class AccountsManager:
             update = {"$unset": {"disabled": ""}}
 
         await self.db.udids.update_one(filter, update)
-    
+
     async def get_account(self, doc_id: str, search_resellers: bool = False):
         filter = {"_id": doc_id, "user_id": self.user_id}
         if search_resellers:
@@ -394,10 +403,10 @@ class AccountsManager:
     async def pagination(self, start_page: int = 0, per_page: int = 15, allow_reseller: bool = False):
         if start_page < 0:
             start_page = 0
-        
+
         if per_page < 1:
             per_page = 15
-        
+
         accounts = self.accounts(search_resellers=allow_reseller)
         total_accounts = await self.total_accounts_count(allow_reseller=allow_reseller)
 
@@ -407,4 +416,3 @@ class AccountsManager:
         accounts = accounts.sort("account_info.attributes.firstName").skip(start_page * per_page).limit(per_page)
 
         return accounts, next_page_no, prev_page_no, total_accounts/per_page
-    

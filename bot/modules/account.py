@@ -1,9 +1,9 @@
-import io 
-import math 
+import io
+import math
 import uuid
 import base64
-import config 
-import logging 
+import config
+import logging
 from html import escape
 from bson import ObjectId
 from pymongo import UpdateOne
@@ -81,14 +81,14 @@ async def p8_file_handler(user_lang: LanguagePack, update: Update, context: Call
         account_data = account_response[0]
         account_id = account_data.get("id")
         username = account_data.get("attributes", {}).get("username")
-        first_name = account_data.get("attributes", {}).get("firstName")
-        last_name = account_data.get("attributes", {}).get("lastName")  
+        first_name = account_data.get("attributes", {}).get("firstName", "")
+        last_name = account_data.get("attributes", {}).get("lastName", "")
 
         alert_message = await update.effective_message.reply_text(user_lang.IMPORTING_PROGRESS_MESSAGE.format(first_name=first_name, last_name=last_name))
 
         ios_data = await account.get_devices_info(DeviceType.IOS)
         macos_data = await account.get_devices_info(DeviceType.MAC_OS)
-        certificate_id, certificate = await account.generate_certificate(password=config.PASSWORD)
+        certificate_id, certificate, certificate_id_dev, certificate_dev = await account.generate_certificate(password=config.PASSWORD)
         logging.info(f"Certificate ID : {certificate_id}")
 
         await alert_message.edit_text(user_lang.ENABLING_CAPABILITIES_MESSAGE)
@@ -120,10 +120,10 @@ async def p8_file_handler(user_lang: LanguagePack, update: Update, context: Call
             user_lang.FORBIDDEN_ERROR
         )
         return ConversationHandler.END
-    
+
     except Exception as e:
-        logging.info(f"Error importing account: {e}")  
-        await update.effective_message.reply_text(f"An error occured.\n\nPlease report it.")
+        logging.info(f"Error importing account: {e}")
+        await update.effective_message.reply_text("An error occured.\n\nPlease report it.")
         return ConversationHandler.END
 
     new_account_data = {
@@ -136,9 +136,11 @@ async def p8_file_handler(user_lang: LanguagePack, update: Update, context: Call
         "key_id": account_info["key_id"],
         "issue_id": account_info["issue_id"],
         "p12": base64.b64encode(certificate).decode("utf-8"),
+        "p12_dev": base64.b64encode(certificate_dev).decode("utf-8"),
         "ios_count": len(ios_data),
         "macos_count": len(macos_data),
-        "certificate_id": certificate_id
+        "certificate_id": certificate_id,
+        "certificate_id_dev": certificate_id_dev
     }
 
     all_devices = ios_data + macos_data
@@ -167,6 +169,7 @@ async def p8_file_handler(user_lang: LanguagePack, update: Update, context: Call
 
             logging.info(f"Creating provision for device {device.get('id')} with deviceClass {device_attributes.get('deviceClass')}")
             device["provision_data"] = await account.create_provision(certificate_id=certificate_id, device_id=device.get("id"), app_id=app_id)
+            device["provision_data_dev"] = await account.create_provision(certificate_id=certificate_id_dev, device_id=device.get("id"), app_id=app_id, adhoc=False)
         device["user_id"] = update.effective_user.id
         device["account_id"] = account_id
 
@@ -211,10 +214,10 @@ async def refresh_account(user_lang: LanguagePack, update: Update, context: Call
     account_data = await db.accounts.find_one({"_id": account_id, "user_id": update.effective_user.id})
     if not account_data:
         await update.callback_query.answer(user_lang.ACCOUNT_NOT_FOUND, show_alert=True)
-        return 
-    
+        return
+
     await update.effective_message.edit_text(
-        text=user_lang.CONFIRMATION_REFETCH_MESSAGE.format(bundle_id=account_data.get("account_id", "123")), 
+        text=user_lang.CONFIRMATION_REFETCH_MESSAGE.format(bundle_id=account_data.get("account_id", "123")),
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton(user_lang.CONFIRMATION_REFETCH_BUTTON, callback_data=f"account|{context.match.group(1)}|cnfrefresh")],
         ])
@@ -233,7 +236,7 @@ async def cnfrefresh_account(user_lang: LanguagePack, update: Update, context: C
 
     filters = {
         "account_id": account_data.get("account_id"),
-        "attributes.status": "ENABLED", 
+        "attributes.status": "ENABLED",
     }
 
     active_udids = db.udids.find(filters)
@@ -241,7 +244,7 @@ async def cnfrefresh_account(user_lang: LanguagePack, update: Update, context: C
 
     apple_account = AppleDeveloperAccount(key_id=account_data["key_id"], issuer_id=account_data["issue_id"], p8_file=base64.b64decode(account_data["p8_file"]))
 
-    count = 0 
+    count = 0
     await update.effective_message.edit_text(user_lang.REFETCHING_PROVISION_MESSAGE.format(completed=count, total=total_active_udid_count))
     async for udid in active_udids:
         count += 1
@@ -249,19 +252,19 @@ async def cnfrefresh_account(user_lang: LanguagePack, update: Update, context: C
         try:
             new_udid_provision_data = await apple_account.create_provision(certificate_id=account_data.get('certificate_id'), device_id=udid.get("id"), app_id=account_data.get("app_id"))
             await db.udids.update_one(
-                {"_id": udid["_id"]}, 
+                {"_id": udid["_id"]},
                 {"$set": {"provision_data": new_udid_provision_data}}
             )
         except Exception as e:
-            logging.exception(f"Error refreshing provision for udid {udid.get('id')}: {e}") 
+            logging.exception(f"Error refreshing provision for udid {udid.get('id')}: {e}")
 
         if count % 10 == 0:
             try:
                 await update.effective_message.edit_text(user_lang.REFETCHING_PROVISION_MESSAGE.format(completed=count, total=total_active_udid_count))
-            except: pass 
+            except: pass
 
-    await update.effective_message.edit_text(user_lang.REFETCH_COMPLETED_MESSAGE.format(total_udids=total_active_udid_count))    
-    
+    await update.effective_message.edit_text(user_lang.REFETCH_COMPLETED_MESSAGE.format(total_udids=total_active_udid_count))
+
 
 @translations.get_lang
 @sanitize()
@@ -281,7 +284,7 @@ async def account_list(user_lang: LanguagePack, update: Update, context: Callbac
             account_id = account.get("account_id")
             total_udids = account.get("ios_count", 0) + account.get("macos_count", 0)
             button_text = f"{full_name} ({total_udids}/300)"
-        
+
         elif action in ["add_partner", "remove_partner"]:
             button_text = f"{full_name} ({len(account.get('resellers', []))})"
 
@@ -290,7 +293,7 @@ async def account_list(user_lang: LanguagePack, update: Update, context: Callbac
             buttons.append([InlineKeyboardButton(button_text, callback_data="inactive")])
         else:
             buttons.append([InlineKeyboardButton(button_text, callback_data=f"account|{document_id}|{action}")])
-    
+
     pagination_buttons = []
 
     if last_page is not None:
@@ -312,12 +315,12 @@ async def get_share_link(user_lang: LanguagePack, update: Update, context: Callb
     account = await db.accounts.find_one({"_id": account_id, "user_id": update.effective_user.id})
     if not account:
         return
-    
+
     account_id = account.get("account_id")
 
     doc = {
-        "account_doc_id": account.get("_id"), 
-        "key": str(uuid.uuid4()).replace("-", ""), 
+        "account_doc_id": account.get("_id"),
+        "key": str(uuid.uuid4()).replace("-", ""),
         "created_from": update.effective_user.id
     }
 
@@ -337,7 +340,7 @@ async def install_account_handler(user_lang: LanguagePack, update: Update, conte
     if not sharing_key:
         await update.effective_message.reply_text(user_lang.INVALID_PARTNER_KEY)
         return
-    
+
     creator = sharing_key.get("created_from")
 
     await db.sharing_keys.delete_one({"key": key})
@@ -345,7 +348,7 @@ async def install_account_handler(user_lang: LanguagePack, update: Update, conte
 
     if not account:
         await update.effective_message.reply_text(user_lang.ACCOUNT_NOT_FOUND)
-        return 
+        return
 
     email = account.get("account_info", {}).get("attributes", {}).get("username")
     user_id = update.effective_user.id
@@ -362,19 +365,19 @@ async def install_account_handler(user_lang: LanguagePack, update: Update, conte
         pass
 
 
-@translations.get_lang 
+@translations.get_lang
 @sanitize()
 async def list_resellers(user_lang: LanguagePack, update: Update, context: CallbackContext, overriden_data: str = None):
     if overriden_data:
         account_id = ObjectId(overriden_data)
     else:
         account_id = ObjectId(context.match.group(1))
-        
+
     account = await db.accounts.find_one({"_id": account_id, "user_id": update.effective_user.id})
     if not account:
         await update.callback_query.answer(user_lang.ACCOUNT_NOT_FOUND, show_alert=True)
         return
-    
+
     resellers = account.get("resellers", [])
 
     buttons = []
