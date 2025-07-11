@@ -251,9 +251,13 @@ async def cnfrefresh_account(user_lang: LanguagePack, update: Update, context: C
 
         try:
             new_udid_provision_data = await apple_account.create_provision(certificate_id=account_data.get('certificate_id'), device_id=udid.get("id"), app_id=account_data.get("app_id"))
+            new_udid_provision_data_dev = await apple_account.create_provision(certificate_id=account_data.get('certificate_id_dev'), device_id=udid.get("id"), app_id=account_data.get("app_id"), adhoc=False)
             await db.udids.update_one(
                 {"_id": udid["_id"]},
-                {"$set": {"provision_data": new_udid_provision_data}}
+                {"$set": {
+                    "provision_data": new_udid_provision_data,
+                    "provision_data_dev": new_udid_provision_data_dev
+                }}
             )
         except Exception as e:
             logging.exception(f"Error refreshing provision for udid {udid.get('id')}: {e}")
