@@ -3,3 +3,4 @@ __pycache__
 .zsign_cache
 *.log*
 data_file
+.ropeproject

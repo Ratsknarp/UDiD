@@ -547,7 +547,7 @@ async def download_certificate_handler(user_lang: LanguagePack, update: Update, 
     await update.callback_query.answer(user_lang.FETCHING_CERTIFICATE, show_alert=True)
     udid = udid_data.get("attributes", {}).get("udid")
     provision_data = udid_data.get("provision_data")
-    provision_data_dev = udid_data.get("provision_data_dev")
+    provision_data_dev = udid_data.get("provision_data_dev", {})
 
     p12_file = account_data.get("p12")
     p12_dev = account_data.get("p12_dev")
@@ -555,19 +555,29 @@ async def download_certificate_handler(user_lang: LanguagePack, update: Update, 
     devMobileprovision = provision_data_dev.get("profileContent")
 
     await update.effective_chat.send_action("upload_document")
-    files = [
-        InputMediaDocument(base64.b64decode(p12_file), filename=f"{udid}.p12"),
-        InputMediaDocument(base64.b64decode(p12_dev), filename=f"{udid}-dev.p12"),
-        InputMediaDocument(
-            base64.b64decode(mobile_provision_file),
-            filename=f"{udid}.mobileprovision"
-        ),
-        InputMediaDocument(
-            base64.b64decode(devMobileprovision),
-            filename=f"{udid}-dev.mobileprovision",
-            caption=user_lang.SIGNED_IPA_CAPTION_MESSAGE.format(password=config.PASSWORD)
-        )
-    ]
+    if devMobileprovision is not None:  # in case the development mobileprovision wasnt generated, old bug, sorry
+        files = [
+            InputMediaDocument(base64.b64decode(p12_file), filename=f"{udid}.p12"),
+            InputMediaDocument(base64.b64decode(p12_dev), filename=f"{udid}-dev.p12"),
+            InputMediaDocument(
+                base64.b64decode(mobile_provision_file),
+                filename=f"{udid}.mobileprovision"
+            ),
+            InputMediaDocument(
+                base64.b64decode(devMobileprovision),
+                filename=f"{udid}-dev.mobileprovision",
+                caption=user_lang.SIGNED_IPA_CAPTION_MESSAGE.format(password=config.PASSWORD)
+            )
+        ]
+    else:
+        files = [
+            InputMediaDocument(base64.b64decode(p12_file), filename=f"{udid}.p12"),
+            InputMediaDocument(
+                base64.b64decode(mobile_provision_file),
+                filename=f"{udid}.mobileprovision",
+                caption=user_lang.SIGNED_IPA_CAPTION_MESSAGE.format(password=config.PASSWORD)
+            )
+        ]
     await update.effective_chat.send_media_group(media=files)
 
     with TemporaryDirectory(dir="temp") as temp_dir:

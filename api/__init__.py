@@ -78,6 +78,9 @@ class AioHttpClient:
 
 class AppleDeveloperAccount:
     API_ENDPOINT = "https://api.appstoreconnect.apple.com/v1"
+
+    # you can pick which capabilities you want enabled by default:
+    # https://developer.apple.com/documentation/appstoreconnectapi/capabilitytype
     CAPABILITIES = [
     ]
 
@@ -207,15 +210,16 @@ class AppleDeveloperAccount:
         await self.revoke_existing_certificates()
         return await self.create_p12_certificates(password=password)
 
-    async def create_app_id(self, account_id: str, callback: callable = None, k: int = 5) -> str:
+    async def create_app_id(self, account_id: str, callback: callable = None, k: int = 5) -> tuple[str, str]:
         url = AppleDeveloperAccount.API_ENDPOINT + "/bundleIds"
         headers = self.headers
+        iden = str(uuid.uuid4())
         new_app_payload = {
             "data": {
                 "type": "bundleIds",
                 "attributes": {
-                    "identifier": account_id,
-                    "name": account_id,
+                    "identifier": iden,
+                    "name": iden,
                     "platform": "IOS",
                 },
             }
@@ -224,7 +228,7 @@ class AppleDeveloperAccount:
         async with AioHttpClient() as http_client:
             try:
                 response = await http_client.request("POST", url=url, headers=headers, json=new_app_payload)
-            except errors.Conflict:
+            except errors.Conflict:  # shouldnt happen anymore, due to uuid used
                 get_bundle_id_payload = {
                     "filter[name]": account_id,
                 }
@@ -262,7 +266,7 @@ class AppleDeveloperAccount:
                         except Exception as e:
                             logging.exception(f"Error executing callable: {e}")
 
-            return app_id
+            return app_id, iden
 
     async def create_provision(self, certificate_id: str, device_id: str, app_id: str, adhoc: bool = True) -> dict:
         profile_url = AppleDeveloperAccount.API_ENDPOINT + "/profiles"

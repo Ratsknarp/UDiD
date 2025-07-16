@@ -40,8 +40,8 @@ class AccountChecker:
                     status = udid_status.get("attributes", {}).get("status")
 
                     if status == "ENABLED":
-                        provision_data = await dev_account.create_provision(certificate_id=account_data.get('certificate_id'), device_id=udid_status.get("id"), app_id=account_data.get("app_id"))
-                        udid_status["provision_data"] = provision_data
+                        udid_status["provision_data"] = await dev_account.create_provision(certificate_id=account_data.get('certificate_id'), device_id=udid_status.get("id"), app_id=account_data.get("app_id"))
+                        udid_status["provision_data_dev"] = await dev_account.create_provision(certificate_id=account_data.get('certificate_id_dev'), device_id=udid_status.get("id"), app_id=account_data.get("app_id"), adhoc=False)
 
                     await self.db.udids.update_one({"_id": udid["_id"]}, {"$set": udid_status})
                 except Exception:
@@ -96,6 +96,6 @@ class AccountChecker:
             #     url = await status_r2.upload_file(file=data_stream, path="certificates2.json")
             #     logging.debug(f"Uploaded data to {url}")
 
-            logging.debug(f"Checked {len(tasks)} accounts in {time.time() - t} seconds!")
+            logging.info(f"Checked {len(tasks)} accounts in {time.time() - t} seconds!")
         except Exception:
             logging.exception("An error occurred")
