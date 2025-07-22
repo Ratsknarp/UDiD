@@ -103,7 +103,7 @@ async def p8_file_handler(user_lang: LanguagePack, update: Update, context: Call
                 TEMPLATE = user_lang.ENABLING_CAPABILITIES_PROGRESS_MESSAGE
             await alert_message.edit_text(TEMPLATE.format(completed=completed, total=total, capabilities=capabilities))
 
-        app_id = await account.create_app_id(account_id, callback=callback_function)
+        app_id, app_bundle_id = await account.create_app_id(account_id, callback=callback_function)
 
     except errors.Unauthorized:
         await update.effective_message.reply_text(
@@ -133,6 +133,7 @@ async def p8_file_handler(user_lang: LanguagePack, update: Update, context: Call
         "inserted_at": update.effective_message.date,
         "account_info": account_data,
         "app_id": app_id,
+        "app_bundle_id": app_bundle_id,
         "key_id": account_info["key_id"],
         "issue_id": account_info["issue_id"],
         "p12": base64.b64encode(certificate).decode("utf-8"),
@@ -160,12 +161,12 @@ async def p8_file_handler(user_lang: LanguagePack, update: Update, context: Call
             continue
 
         if device_attributes.get('status') in ["ENABLED"]:
-            if device_attributes.get('status') == "DISABLED":
-                logging.info(f"Enabling device {device.get('id')}")
-                register_response = await account.enable_udid(udid_id=device.get('id'))
-                # logging.info(register_response)
-
-                device = await account.get_udid_info(udid_id=device.get("id"))
+            # um, this was never going to run, lol
+            # if device_attributes.get('status') == "DISABLED":
+            #     logging.info(f"Enabling device {device.get('id')}")
+            #     register_response = await account.enable_udid(udid_id=device.get('id'))
+            #     # logging.info(register_response)
+            #     device = await account.get_udid_info(udid_id=device.get("id"))
 
             logging.info(f"Creating provision for device {device.get('id')} with deviceClass {device_attributes.get('deviceClass')}")
             device["provision_data"] = await account.create_provision(certificate_id=certificate_id, device_id=device.get("id"), app_id=app_id)
@@ -216,8 +217,11 @@ async def refresh_account(user_lang: LanguagePack, update: Update, context: Call
         await update.callback_query.answer(user_lang.ACCOUNT_NOT_FOUND, show_alert=True)
         return
 
+    if (app_bundle_id := account_data.get("app_bundle_id")) is None:
+        app_bundle_id = account_data.get("account_id")
+
     await update.effective_message.edit_text(
-        text=user_lang.CONFIRMATION_REFETCH_MESSAGE.format(bundle_id=account_data.get("account_id", "123")),
+        text=user_lang.CONFIRMATION_REFETCH_MESSAGE.format(bundle_id=app_bundle_id),
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton(user_lang.CONFIRMATION_REFETCH_BUTTON, callback_data=f"account|{context.match.group(1)}|cnfrefresh")],
         ])
